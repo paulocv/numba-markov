@@ -1,5 +1,5 @@
 """ MULTIPLE RUNS OF THE MARKOV CHAIN CALCULATION - as devtest"""
-
+  
 import numpy as np
 import pandas as pd
 import itertools
