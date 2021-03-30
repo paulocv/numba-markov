@@ -2,7 +2,7 @@
 
 An optimized python implementation of discrete-time Microscopic Markov Chain Approach (MMCA) [1] for epidemic models in static single-layer and multiplex networks.
 
-The code uses numba (v 0.53.0) and awkward (1.0.0) to wrap the core calculations into low-level code, making the performance and memory usage comparable to C/Fortran.
+The code uses numba (v 0.53.0) and awkward (v 1.0.0) to wrap the core calculations into low-level code, making the performance and memory usage comparable to C/Fortran.
 
 **Disclaimer:**  this is not a python package. Currently this repository is meant to display the code that I use in my research project. Upon enough request, I can consider turning it into an installable package. 
 
