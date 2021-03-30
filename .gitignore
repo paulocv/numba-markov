@@ -1,3 +1,6 @@
+# DEV custom ignores/includes
+toolbox/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
