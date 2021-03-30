@@ -1,0 +1,261 @@
+"""
+A static graph for optimized Markov chain calculations.
+Graphs (i.e., layers) can be grouped into a multiplex structure.
+
+The graph must be initialized with all vertices and edges. Once done, its structure can't be changed.
+
+Author: Paulo Cesar Ventura da Silva (https://github.com/paulocv)
+"""
+
+import awkward1 as ak
+# import numba as nb
+import numpy as np
+import scipy
+import scipy.sparse
+import scipy.sparse.linalg
+
+from .types import np_ncount_t  # , nb_ncount_t
+
+
+class Layer:
+    """
+    A simple graph class with a fixed structure.
+    Nodes and edges are informed at initialization and held fixed during
+    the existence of the object.
+
+    From: fastepidem module
+    """
+
+    __slots__ = ["size", "neighbors_list", "neighbors_alist", "neighbors_awk",
+                 "_adjmat", "_eigv_centrality", "_eigval"]
+
+    # # I think these are remnants from the fastepidem. No need here, just delete.
+    # neigh_count_methods = None  # Defined at the end of the module
+    # default_neigh_count_method = "numba"
+
+    # @profile
+    def __init__(self, size, edges,
+                 keep_neighbors_as=("list", "alist", "awk")):
+        """
+        Initializes a static graph with fixed structure.
+
+        For use with different iteration methods, various types of adjacency structures
+        (i.e., lists of neighbors for each node) can be kept by the graph. This is defined
+        by the `keep_neighbors_as` parameter.
+
+        Devnote: the "list", "alist", ... names can be annoying to be flying around.
+          If repeated use of these names is needed, consider making a list of such names
+          and dict of methods to allocate these structures.
+
+        Parameters
+        ----------
+        size : int
+        edges : a container of tuples.
+        keep_neighbors_as : iterable
+        """
+        super().__init__()
+        self.size = np_ncount_t(size)
+
+        # ------------------------------------------------------
+        # Construction of the adjacency list (using python lists) from a list of edges
+        self.neighbors_list = [[] for _ in range(size)]
+        self._add_edges_from(edges)  # TODO: convert edges from string??
+
+        # ------------------------------------------------------
+        # Creation of other neighbor containers for optimal operation.
+        self.neighbors_alist = None
+        self.neighbors_awk = None
+
+        # List of numpy arrays, for semi-vectorized methods
+        if "alist" in keep_neighbors_as:
+            self.neighbors_alist = [np.array(neighs, dtype=np_ncount_t) for neighs in self.neighbors_list]
+
+        # Awkward array for optimal handling of the ragged structure with numba.
+        if "awk" in keep_neighbors_as:
+            self.neighbors_awk = ak.Array(self.neighbors_list)
+
+        # Optionally deletes the original list-of-lists.
+        if "list" not in keep_neighbors_as:
+            del self.neighbors_list
+            self.neighbors_list = None
+
+        # -----------------------------------------------------
+        # Extra data structures, constructed and returned uppon request
+        self._adjmat = None
+        self._eigv_centrality = None
+        self._eigval = None
+
+    def __len__(self):
+        return self.size
+
+    def assert_node(self, i):
+        """Checks if index i is valid as a node index."""
+        if i < 0 or i >= self.size:
+            raise ValueError("Hey, node index {} does not fit into graph with size {}."
+                             "".format(i, self.size))
+
+    def _add_edge(self, i, j):
+        self.assert_node(i)
+        self.assert_node(j)
+        self.neighbors_list[i].append(np_ncount_t(j))
+        self.neighbors_list[j].append(np_ncount_t(i))
+
+    # @profile
+    def _add_edges_from(self, edges):
+        for i, j in edges:
+            self._add_edge(i, j)
+
+    # ----------------------------------
+    # Convenience methods
+    # ----------------------------------
+    # These are not focused on performance.
+
+    def neighbors(self, i):
+        """Gets a sequence of neighbors from node i.
+        This is intended for simple high-level access, not for performance.
+        It tries to dodge the differences in the allocated structures.
+        """
+        for suffix in ["list", "alist", "awk"]:
+            attr = self.__getattribute__("neighbors_" + suffix)
+            if attr is not None:
+                return attr[i]
+        else:
+            raise AttributeError("Hey, graph {} oddly doesn't have any allocated adjacency"
+                                 " structure. This may be an internal error, but you can"
+                                 " check the parameter 'keep_neighbors_as' at the"
+                                 " initialization of this class.".format(self))
+
+    def degree(self, i):
+        return len(self.neighbors(i))
+
+    def get_adjmat(self, sparse=True, recalc=False):
+        """
+        Returns the adjacency matrix of the graph (with float datatype).
+        Each entry (i, j) is 1. if i and j are connected and 0. otherwise.
+        The matrix is allocated and calculated by the first call to this function. In the following ones,
+        the stored result is returned. A new allocation/calculation is done if recalc == True.
+
+        The construction of the matrix is not optimized.
+        """
+        if self._adjmat is None or recalc:
+            # --- scipy.sparse matrix construction
+            if sparse:
+                mat = scipy.sparse.lil_matrix((self.size, self.size))  # LIL (list-of-lists) representation
+                for i in range(self.size):
+                    for j in self.neighbors(i):
+                        mat[i, j] = 1.
+                # Converts to the Compressed Sparse Row representation, which is better for matmul operations.
+                self._adjmat = mat.tocsr()
+                del mat
+
+            # --- Non-sparse matrix construction
+            else:
+                # Allocates and constructs the adjacency matrix
+                self._adjmat = np.zeros((self.size, self.size), dtype=float)
+
+                for i in range(self.size):
+                    for j in self.neighbors(i):
+                        self._adjmat[i, j] = 1.
+
+        return self._adjmat
+
+    def get_eig(self, sparse=True, recalc=False):
+        """
+        Returns the greatest eigenvalue and the corresponding eigenvector of the adjacency matrix.
+
+        Set sparse to False to prevent using scipy.sparse diagonalization function (optimized for sparse matrix).
+        """
+        if self._eigv_centrality is None or recalc:
+            mat = self.get_adjmat()
+
+            if sparse:
+                self._eigval, self._eigv_centrality = scipy.sparse.linalg.eigs(mat.transpose(), k=1)
+            else:
+                self._eigval, self._eigv_centrality = scipy.linalg.eig(mat.transpose())
+
+            # Reshapes and rearranges the array, then normalizes by its sum
+            self._eigv_centrality = self._eigv_centrality.real.flatten().ravel()
+            self._eigv_centrality /= np.sum(self._eigv_centrality)
+            self._eigval = self._eigval.real[0]
+
+        return self._eigval, self._eigv_centrality
+
+
+class NLayerMultiplex:
+    """A simple bunch class that groups same-sized layers to form a multiplex. Created from Layer objects,
+    promotes type and size checks on initialization.
+    """
+
+    __slots__ = ["g", "num_layers", "size"]
+
+    def __init__(self, g_list, num_layers=None):
+        """Creates a multiplex object from a list of Layer objects.
+
+        g_list must be a list of Layer objects (not networkx graphs!).
+        Optionally, you can pass a single Layer object and specify num_layers to create a multiplex with
+        repeated layers (i.e., a single-layer network with multiplex compatibility). If num_layers is not
+        informed, it is treated as 1.
+
+
+        Parameters
+        ----------
+        g_list : list, Layer
+            List of Layer objects. If a single Layer, repeats it over num_layers.
+        num_layers : int
+            Number of layers for repeated multiplex. Ignored if g_list is not a single Layer object.
+        """
+
+        # --------------
+        # Convenience routines
+        # --------------
+        # Shorthand to create a n-layer multiplex from the same layer
+        if isinstance(g_list, Layer):
+            if num_layers is None:
+                num_layers = 1
+            g_list = [g_list for _ in range(num_layers)]
+
+        # Now, regardless of the g_list original type, num_layers is set to its size.
+        num_layers = len(g_list)
+
+        # ---------------
+        # Construction checkouts
+        # ---------------
+        # Type check. We do not create Layers from nx networks on the fly.
+        for g in g_list:
+            if not isinstance(g, Layer):
+                raise TypeError("Hey, to initialize a multiplex, each element of g_list must be a Layer object. "
+                                "Currently, one of the items is a '{}' object.".format(type(g)))
+
+        # Size check:
+        size = g_list[0].size
+        for i_g, g in enumerate(g_list[1:]):
+            if g.size != size:
+                raise ValueError("Hey, the multiplex received layers with different sizes.\n"
+                                 "Size of the first layer:   {:d}\n"
+                                 "Size of the {:d}-th layer: {:d}".format(self.size, i_g + 1, g.size))
+
+        # ---------------
+        # Object attributes
+        # ---------------
+        self.g = g_list
+        self.num_layers = num_layers
+        self.size = size
+
+    def __len__(self):
+        """Gets the number of nodes, not layers."""
+        return self.size
+
+
+def nx_to_layer(g_nx, keep_neighbors_as=None):
+    """Shorthand to create a Markov Layer from an nx Graph.
+    Only use nx Graphs that contain sequential indexes as names!! Otherwise, the edges can be wrongly set.
+    """
+    if keep_neighbors_as is None:
+        return Layer(len(g_nx), list(g_nx.edges()))
+    else:
+        return Layer(len(g_nx), list(g_nx.edges()), keep_neighbors_as=keep_neighbors_as)
+
+
+def layer_to_nx(g_layer):
+    """Shorthand to create an nx Graph from a Markov Layer."""
+    raise NotImplementedError
