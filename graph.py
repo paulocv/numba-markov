@@ -8,7 +8,8 @@ Author: Paulo Cesar Ventura da Silva (https://github.com/paulocv)
 """
 
 import awkward1 as ak
-# import numba as nb
+import numba as nb
+from numba.typed import List as TypedList
 import numpy as np
 import scipy
 import scipy.sparse
@@ -26,7 +27,7 @@ class Layer:
     From: fastepidem module
     """
 
-    __slots__ = ["size", "neighbors_list", "neighbors_alist", "neighbors_awk",
+    __slots__ = ["size", "neighbors_list", "neighbors_alist", "neighbors_awk", "neighbors_numba_list",
                  "_adjmat", "_eigv_centrality", "_eigval"]
 
     # # I think these are remnants from the fastepidem. No need here, just delete.
@@ -56,10 +57,15 @@ class Layer:
         super().__init__()
         self.size = np_ncount_t(size)
 
+        # TODO: maybe a shortcut for when only awk structure is to be kept: direct construc via ArrayBuilder
+
         # ------------------------------------------------------
         # Construction of the adjacency list (using python lists) from a list of edges
-        self.neighbors_list = [[] for _ in range(size)]
-        self._add_edges_from(edges)  # TODO: convert edges from string??
+        # self.neighbors_list = [[] for _ in range(size)]  # Python list. Can't be numbaed.
+        self.neighbors_list = _make_typed_list_for_neighbors(self.size)  # Numba typed list.
+
+        # self._add_edges_from(edges)  # Pure python construction
+        _add_edges_from(edges, self.size, self.neighbors_list)  # Numba construction with numba typed list
 
         # ------------------------------------------------------
         # Creation of other neighbor containers for optimal operation.
@@ -67,12 +73,23 @@ class Layer:
         self.neighbors_awk = None
 
         # List of numpy arrays, for semi-vectorized methods
+        # TODO: implementation that uses numba typed list
         if "alist" in keep_neighbors_as:
+            # This is currently slow, specially because neighbors_list is a numba typed list, slower outside numba.
             self.neighbors_alist = [np.array(neighs, dtype=np_ncount_t) for neighs in self.neighbors_list]
 
         # Awkward array for optimal handling of the ragged structure with numba.
         if "awk" in keep_neighbors_as:
-            self.neighbors_awk = ak.Array(self.neighbors_list)
+            # ----
+            # Low-level build using ak.ArrayBuilder. Can be numbaed.
+            builder = ak.ArrayBuilder()
+            _make_awk_from_typed_list(self.neighbors_list, builder)
+            self.neighbors_awk = builder.snapshot()
+            del builder
+
+            # ----
+            # High-level build. Will be slower with numba typed lists than with regular lists.
+            # self.neighbors_awk = ak.Array(self.neighbors_list)  # Old formulation, slower
 
         # Optionally deletes the original list-of-lists.
         if "list" not in keep_neighbors_as:
@@ -100,10 +117,14 @@ class Layer:
         self.neighbors_list[i].append(np_ncount_t(j))
         self.neighbors_list[j].append(np_ncount_t(i))
 
-    # @profile
+    # def _add_edges_from(self, edges):
+    #     for i, j in edges:
+    #         self._add_edge(i, j)
+
+    # Slightly more performant than the previous (with edges as an array)
     def _add_edges_from(self, edges):
-        for i, j in edges:
-            self._add_edge(i, j)
+        for edge in edges:
+            self._add_edge(edge[0], edge[1])
 
     # ----------------------------------
     # Convenience methods
@@ -259,3 +280,72 @@ def nx_to_layer(g_nx, keep_neighbors_as=None):
 def layer_to_nx(g_layer):
     """Shorthand to create an nx Graph from a Markov Layer."""
     raise NotImplementedError
+
+
+# -----------------------------------------
+# NUMBA FUNCTIONS
+# -----------------------------------------
+
+@nb.njit
+def _make_typed_list_for_neighbors(size):
+    """
+    Creates an empty nested typed list, with two levels and 'size' elements.
+
+    As of 2021/04/13, numba typed List is experimental and cannot receive its type in advance. Thus a very ugly
+    append-and-pop solution had to be used.
+    """
+    res = TypedList()
+
+    # Creates a prototype for the inner lists, with type inference via append-and-pop.
+    proto_list = TypedList()
+    proto_list.append(np_ncount_t(0))
+    proto_list.pop()
+    for i in range(size):
+        res.append(proto_list.copy())  # Just copy the empty prototype
+    return res
+
+
+@nb.njit
+def _assert_node_index(i, size):
+    """Checks and if a node index is compatible with a graph's size."""
+    if i >= size:
+        # Error message must be a compile-time constant.
+        raise ValueError("Hey, a node index is greater than the graph's size. I cannot know which index is because "
+                         "I am a numba-compiled function, but you can try constructing the list of neighbors with "
+                         "Layer._add_edges_from, which calls the non-numba Layer._assert_node. This will report the "
+                         "invalid index to you.")
+
+
+@nb.njit
+def _add_edges_from(edges, size, neighbors_list):
+    """
+    Numba function that constructs a list of neighbors from a numpy array of edges.
+    NOTICE: edges must be a numpy array, so read it from file using 'load_edgl_as_array' instead of 'load_edgl'.
+    The neighbors_list must have been previously allocated as a numba typed list. Use _make_typed_list_for_neighbors.
+    """
+    for i, j in edges:
+        _assert_node_index(i, size)
+        _assert_node_index(j, size)
+        neighbors_list[i].append(np_ncount_t(j))
+        neighbors_list[j].append(np_ncount_t(i))
+
+
+# https://awkward-array.readthedocs.io/en/stable/_auto/ak.Array.html
+# "(...) The only limitation is that Awkward Arrays cannot be created inside the Numba-compiled function;
+# to make outputs, consider ak.ArrayBuilder"
+
+# See this topic for a detailed discussion from a user with more or less the same problem:
+# https://github.com/scikit-hep/awkward-1.0/discussions/328
+@nb.njit
+def _make_awk_from_typed_list(neighbors_list, builder):
+    """
+    Constructs an awkward array from a numba typed list using awkward's ArrayBuilder.
+    No returned object. The actual awkward array must be extracted from builder.snapshot().
+    """
+    for i, neighs in enumerate(neighbors_list):
+        # Creates a new line ("list") in the builder
+        # # with builder.list():  # Numba incompatible
+        builder.begin_list()
+        for j in neighs:
+            builder.integer(j)  # Appends as int64, unavoidably...
+        builder.end_list()

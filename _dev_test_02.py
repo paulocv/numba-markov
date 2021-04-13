@@ -1,5 +1,5 @@
 """ MULTIPLE RUNS OF THE MARKOV CHAIN CALCULATION - as devtest"""
-  
+
 import numpy as np
 import pandas as pd
 import itertools
@@ -42,13 +42,13 @@ tol = 1.E-6
 N = int(1E4)  # int(5E5)
 print("Loading network edgelist from file")
 # edges = load_edgl("networks/ER/ER_10000_k10_1.edgl")
-edges = load_edgl("networks/assortat_SF-CM/N10k/g2p00_k2_000.edgl")
-# edges = load_edgl("networks/assortat_SF-CM/N100k/g2p00_k2_000.edgl")
-# edges = load_edgl("networks/assortat_SF-CM/N500k/g2p00_k2_000.edgl")
+edges = load_edgl("networks/SF-CM/N10k/g2p00_k2_000.edgl")
+# edges = load_edgl("networks/SF-CM/N100k/g2p00_k2_000.edgl")
+# edges = load_edgl("networks/SF-CM/N500k/g2p00_k2_000.edgl")
 gl = Layer(N, edges, keep_neighbors_as=["awk"])
 
 # Another layer
-edges = load_edgl("networks/assortat_SF-CM/N10k/g2p00_k2_002.edgl")
+edges = load_edgl("networks/SF-CM/N10k/g2p00_k2_002.edgl")
 hl = Layer(N, edges, keep_neighbors_as=["awk"])
 
 
