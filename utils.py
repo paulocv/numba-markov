@@ -47,7 +47,7 @@ def guess_num_nodes_from(edgelist):
     """
     Gets the greatest node index 'maxi' from an edgelist. Returns 1 + maxi as an estimate of the network size.
     """
-    raise NotImplementedError
+    return np.max(edgelist) + 1
 
 
 def nav_ipr(x):
