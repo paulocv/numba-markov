@@ -21,7 +21,7 @@ from .types import nb_p_t, nb_ncount_t, awk_adjlist_t, nb_int_t, nb_float_t
 from .utils import str_to_list_json
 
 
-PARALLEL_NUMBA = False  # Make this an environment variable!? It may be worth only for somehow large networks.
+PARALLEL_NUMBA = True  # Make this an environment variable!? It may be worth only for somehow large networks.
 
 
 class ModelBase:

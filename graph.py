@@ -8,13 +8,14 @@ Author: Paulo Cesar Ventura da Silva (https://github.com/paulocv)
 """
 
 import awkward1 as ak
-# import numba as nb
+import numba as nb
+from numba.typed import List as TypedList
 import numpy as np
 import scipy
 import scipy.sparse
 import scipy.sparse.linalg
 
-from .types import np_ncount_t  # , nb_ncount_t
+from .types import np_ncount_t, np_float_t  # , nb_ncount_t
 
 
 class Layer:
@@ -26,26 +27,31 @@ class Layer:
     From: fastepidem module
     """
 
-    __slots__ = ["size", "neighbors_list", "neighbors_alist", "neighbors_awk",
+    __slots__ = ["size", "edges", "num_edges", "neighbors_list", "neighbors_alist", "neighbors_awk",
                  "_adjmat", "_eigv_centrality", "_eigval"]
-
-    # # I think these are remnants from the fastepidem. No need here, just delete.
-    # neigh_count_methods = None  # Defined at the end of the module
-    # default_neigh_count_method = "numba"
 
     # @profile
     def __init__(self, size, edges,
                  keep_neighbors_as=("list", "alist", "awk")):
         """
         Initializes a static graph with fixed structure.
+        The parameter edges is necessarily a 2D numpy array of pairs a[i] = [node_index, neighbor_index].
 
         For use with different iteration methods, various types of adjacency structures
         (i.e., lists of neighbors for each node) can be kept by the graph. This is defined
-        by the `keep_neighbors_as` parameter.
+        by the `keep_neighbors_as` parameter. Some may take much longer to be constructed though, depending
+        on the current implementation.
 
         Devnote: the "list", "alist", ... names can be annoying to be flying around.
           If repeated use of these names is needed, consider making a list of such names
           and dict of methods to allocate these structures.
+
+        Devnote future feature: a shortcut for when only "awk" is asked to be kept. The code could construct the
+          awkward array directly from the array of edges.
+
+        Devnote future feature: after migrating from python list to numba typed list, the non-numba construction of
+          neighbors_alist is quite slow. Maybe using a numba typed list and a numbaed function could speed this up,
+          if possible.
 
         Parameters
         ----------
@@ -56,10 +62,22 @@ class Layer:
         super().__init__()
         self.size = np_ncount_t(size)
 
+        # ----------------------------------------------------------
+        # List of edges - type check and attribution
+        # Check: edges now must be a numpy array of shape (num_edges, 2)
+        if type(edges) is not np.ndarray:
+            raise TypeError("Hey, now the argument 'edges' is required to be a numpy array of shape (num_edges, 2). "
+                            "If you used 'load_edgl', consider using 'load_edgl_as_array' instead.")
+        self.edges = edges
+        self.num_edges = edges.shape[0]
+
         # ------------------------------------------------------
         # Construction of the adjacency list (using python lists) from a list of edges
-        self.neighbors_list = [[] for _ in range(size)]
-        self._add_edges_from(edges)  # TODO: convert edges from string??
+        # self.neighbors_list = [[] for _ in range(size)]  # Python list. Can't be numbaed.
+        self.neighbors_list = _make_typed_list_for_neighbors(self.size)  # Numba typed list.
+
+        # self._add_edges_from(edges)  # Pure python construction
+        _add_edges_from(edges, self.size, self.neighbors_list)  # Numba construction with numba typed list
 
         # ------------------------------------------------------
         # Creation of other neighbor containers for optimal operation.
@@ -68,11 +86,21 @@ class Layer:
 
         # List of numpy arrays, for semi-vectorized methods
         if "alist" in keep_neighbors_as:
+            # This is currently slow, specially because neighbors_list is a numba typed list, slower outside numba.
             self.neighbors_alist = [np.array(neighs, dtype=np_ncount_t) for neighs in self.neighbors_list]
 
         # Awkward array for optimal handling of the ragged structure with numba.
         if "awk" in keep_neighbors_as:
-            self.neighbors_awk = ak.Array(self.neighbors_list)
+            # ----
+            # Low-level build using ak.ArrayBuilder. Can be numbaed.
+            builder = ak.ArrayBuilder()
+            _make_awk_from_typed_list(self.neighbors_list, builder)
+            self.neighbors_awk = builder.snapshot()
+            del builder
+
+            # ----
+            # High-level build. Will be slower with numba typed lists than with regular lists.
+            # self.neighbors_awk = ak.Array(self.neighbors_list)  # Old formulation, slower
 
         # Optionally deletes the original list-of-lists.
         if "list" not in keep_neighbors_as:
@@ -100,10 +128,14 @@ class Layer:
         self.neighbors_list[i].append(np_ncount_t(j))
         self.neighbors_list[j].append(np_ncount_t(i))
 
-    # @profile
+    # def _add_edges_from(self, edges):
+    #     for i, j in edges:
+    #         self._add_edge(i, j)
+
+    # Slightly more performant than the previous (with edges as an array)
     def _add_edges_from(self, edges):
-        for i, j in edges:
-            self._add_edge(i, j)
+        for edge in edges:
+            self._add_edge(edge[0], edge[1])
 
     # ----------------------------------
     # Convenience methods
@@ -140,13 +172,25 @@ class Layer:
         if self._adjmat is None or recalc:
             # --- scipy.sparse matrix construction
             if sparse:
-                mat = scipy.sparse.lil_matrix((self.size, self.size))  # LIL (list-of-lists) representation
-                for i in range(self.size):
-                    for j in self.neighbors(i):
-                        mat[i, j] = 1.
-                # Converts to the Compressed Sparse Row representation, which is better for matmul operations.
-                self._adjmat = mat.tocsr()
-                del mat
+                # # ---------
+                # # Old: constructs LIL format first within for loops, then converts to CSR
+                # mat = scipy.sparse.lil_matrix((self.size, self.size))  # LIL (list-of-lists) representation
+                # for i in range(self.size):
+                #     for j in self.neighbors(i):
+                #         mat[i, j] = 1.
+                # # Converts to the Compressed Sparse Row representation, which is better for matmul operations.
+                # self._adjmat = mat.tocsr()
+                # del mat
+
+                # # ---------
+                # # New: direct construction of CSR from list of edges (assuming it is a 2D array of pairs). Way faster.
+                # Temporarily duplicates the edges to include the reciprocal entries
+                tmp_row_idx = np.concatenate((self.edges[:, 0], self.edges[:, 1]))
+                tmp_col_idx = np.concatenate((self.edges[:, 1], self.edges[:, 0]))
+                self._adjmat = scipy.sparse.csr_matrix((np.ones(2 * self.num_edges, dtype=np_float_t),  # Data: 1
+                                                       (tmp_row_idx, tmp_col_idx)),  # Indexes of non-null entries
+                                                       shape=(self.size, self.size))
+                del tmp_row_idx, tmp_col_idx
 
             # --- Non-sparse matrix construction
             else:
@@ -169,9 +213,9 @@ class Layer:
             mat = self.get_adjmat()
 
             if sparse:
-                self._eigval, self._eigv_centrality = scipy.sparse.linalg.eigs(mat.transpose(), k=1)
+                self._eigval, self._eigv_centrality = scipy.sparse.linalg.eigs(mat, k=1)
             else:
-                self._eigval, self._eigv_centrality = scipy.linalg.eig(mat.transpose())
+                self._eigval, self._eigv_centrality = scipy.linalg.eig(mat)
 
             # Reshapes and rearranges the array, then normalizes by its sum
             self._eigv_centrality = self._eigv_centrality.real.flatten().ravel()
@@ -259,3 +303,80 @@ def nx_to_layer(g_nx, keep_neighbors_as=None):
 def layer_to_nx(g_layer):
     """Shorthand to create an nx Graph from a Markov Layer."""
     raise NotImplementedError
+
+
+# -----------------------------------------
+# NUMBA FUNCTIONS
+# -----------------------------------------
+
+@nb.njit
+def _make_typed_list_for_neighbors(size):
+    """
+    Creates an empty nested typed list, with two levels and 'size' elements.
+
+    As of 2021/04/13, numba typed List is experimental and cannot receive its type in advance. Thus a very ugly
+    append-and-pop solution had to be used.
+    """
+    res = TypedList()
+
+    # Creates a prototype for the inner lists, with type inference via append-and-pop.
+    proto_list = TypedList()
+    proto_list.append(np_ncount_t(0))
+    proto_list.pop()
+    for i in range(size):
+        res.append(proto_list.copy())  # Just copy the empty prototype
+    return res
+
+
+@nb.njit
+def _assert_node_index(i, size):
+    """Checks and if a node index is compatible with a graph's size."""
+    if i >= size:
+        # Error message must be a compile-time constant.
+        raise ValueError("Hey, a node index is greater than the graph's size. I cannot know which index is because "
+                         "I am a numba-compiled function, but you can try constructing the list of neighbors with "
+                         "Layer._add_edges_from, which calls the non-numba Layer._assert_node. This will report the "
+                         "invalid index to you.")
+
+
+@nb.njit
+def _add_edges_from(edges, size, neighbors_list):
+    """
+    Numba function that constructs a list of neighbors from a numpy array of edges.
+    NOTICE: edges must be a numpy array, so read it from file using 'load_edgl_as_array' instead of 'load_edgl'.
+    The neighbors_list must have been previously allocated as a numba typed list. Use _make_typed_list_for_neighbors.
+    """
+    for i, j in edges:
+        _assert_node_index(i, size)
+        _assert_node_index(j, size)
+        neighbors_list[i].append(np_ncount_t(j))
+        neighbors_list[j].append(np_ncount_t(i))
+
+
+# https://awkward-array.readthedocs.io/en/stable/_auto/ak.Array.html
+# "(...) The only limitation is that Awkward Arrays cannot be created inside the Numba-compiled function;
+# to make outputs, consider ak.ArrayBuilder"
+
+# See this topic for a detailed discussion from a user with more or less the same problem:
+# https://github.com/scikit-hep/awkward-1.0/discussions/328
+@nb.njit
+def _make_awk_from_typed_list(neighbors_list, builder):
+    """
+    Constructs an awkward array from a numba typed list using awkward's ArrayBuilder.
+    No returned object. The actual awkward array must be extracted from builder.snapshot().
+    """
+    for neighs in neighbors_list:
+        # Creates a new line ("list") in the builder
+        # # with builder.list():  # Numba incompatible
+        builder.begin_list()
+        for j in neighs:
+            builder.integer(j)  # Appends as int64, unavoidably...
+        builder.end_list()
+
+
+@nb.njit
+def _construct_adjacency_matrix(neighbors, size, lil_mat):
+    """"""
+    for i in range(size):
+        for j in neighbors[i]:
+            lil_mat[i, j] = 1.

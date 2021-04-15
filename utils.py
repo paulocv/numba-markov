@@ -8,6 +8,8 @@ import numba as nb
 import numpy as np
 import pandas as pd
 
+from .types import np_ncount_t
+
 
 MACH_EPSILON = np.finfo(float).eps
 
@@ -23,6 +25,7 @@ def str_to_list_json(s):
     return json.loads(s)
 
 
+# TODO: FOR THE NEXT TWO FUNCTIONS, ADD FUNCTIONALITY TO READ THE NUMBER OF NODES AS THE FIRST ARGUMENT
 def load_edgl(fname):
     """Uses pandas to load an edgelist file and returns it as a list of tuples with pairs of connected nodes."""
     # Reads edges
@@ -31,11 +34,20 @@ def load_edgl(fname):
     return list(df.itertuples(index=False, name=None))
 
 
+def load_edgl_as_array(fname):
+    """
+    Uses pandas to load an edgelist file and returns it as a 2D array with pairs of connected nodes.
+    Signature: a[i, 0] and a[i, 1] are two connected vertices.
+    """
+    df = pd.read_csv(fname, sep=" ", header=None, usecols=[0, 1])
+    return df.to_numpy(dtype=np_ncount_t)
+
+
 def guess_num_nodes_from(edgelist):
     """
     Gets the greatest node index 'maxi' from an edgelist. Returns 1 + maxi as an estimate of the network size.
     """
-    raise NotImplementedError
+    return np.max(edgelist) + 1
 
 
 def nav_ipr(x):
