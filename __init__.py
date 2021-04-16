@@ -1,18 +1,17 @@
+"""
+This file defines what is loaded as:
+import numba_markov  # then use numba_markov.Layer
+from numba_markov import [something]  # then simply call [something]
+from numba_markov import *   # Extracts from the __all__ variable
+"""
 
-# When the package structure is more or less defined, set this file to define what is loaded as:
-# # import numba_markov
-# # from numba_markov import [something]
-# # from numba_markov import *
-
-# # EXAMPLE - FROM fastepidem
 # # ---------
 from .graph import Layer, NLayerMultiplex
 # from model_base import ModelBase  # model_update functions are not private, yet not meant to be imported here.
-from .models.simple_sis import SimpleSIS
-from .models.double_sis import DoubleSIS
+from .models import SimpleSIS, DoubleSIS  # These are exposed on models/__init__.py
 from .exec_data import ExecData
 from .sim_results import SimResults
-#
+
 #
 # __all__ = [
 #     "StaticGraph",
