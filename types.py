@@ -1,7 +1,7 @@
 """Defines numeric types for use in this package, unifying these through
 the models.
 """
-import awkward1 as ak
+import awkward as ak
 import numpy as np
 import numba as nb
 

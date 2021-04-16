@@ -7,7 +7,7 @@ The graph must be initialized with all vertices and edges. Once done, its struct
 Author: Paulo Cesar Ventura da Silva (https://github.com/paulocv)
 """
 
-import awkward1 as ak
+import awkward as ak
 import numba as nb
 from numba.typed import List as TypedList
 import numpy as np

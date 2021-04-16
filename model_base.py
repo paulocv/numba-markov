@@ -12,16 +12,18 @@ devnote - Things that could further improve CPU (or RAM) performance:
 
 import numba as nb
 import numpy as np
+import os
 import time
 
 from .exec_data import ExecData
 from .graph import NLayerMultiplex
 from .sim_results import SimResults
 from .types import nb_p_t, nb_ncount_t, awk_adjlist_t, nb_int_t, nb_float_t
-from .utils import str_to_list_json
+from .utils import str_to_list_json, str_to_bool_safe
 
 
-PARALLEL_NUMBA = True  # Make this an environment variable!? It may be worth only for somehow large networks.
+# PARALLEL_NUMBA = True
+PARALLEL_NUMBA = str_to_bool_safe(os.getenv("NUMBA_PARALLEL", default=True))  # Reads from environment variable
 
 
 class ModelBase:

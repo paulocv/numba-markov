@@ -4,7 +4,7 @@ Some may be taken from my "toolbox" folder.
 """
 
 import json
-import numba as nb
+# import numba as nb
 import numpy as np
 import pandas as pd
 
@@ -13,6 +13,9 @@ from .types import np_ncount_t
 
 MACH_EPSILON = np.finfo(float).eps
 
+
+# ---------------------------------------
+# OPERATIONS BETWEEN VARIABLE TYPES, ETC
 
 def str_to_list_json(s):
     """Converts a string to a python list using json.loads().
@@ -25,6 +28,34 @@ def str_to_list_json(s):
     return json.loads(s)
 
 
+def str_to_bool_safe(s, truelist=("True", "true", "T"), falselist=("False", "false", "F")):
+    """
+    Converts a boolean codified as a string. Instead of using 'eval', compares with lists of accepted strings for
+    both true and false bools, and raises an error if the string does not match any case.
+
+    Parameters
+    ----------
+    s : str
+        The string to be read from
+    truelist : tuple or list
+        Tuple or list of strings interpreted as True.
+    falselist : tuple or list
+        Tuple or list of strings interpreted as False.
+
+    Returns
+    -------
+    res : bool
+    """
+    if s in truelist:
+        return True
+    elif s in falselist:
+        return False
+    else:
+        raise ValueError("Hey, the string '{}' could not be understood as a boolean.".format(s))
+
+
+# ----------------------------------------
+# NETWORK OPERATIONS
 # TODO: FOR THE NEXT TWO FUNCTIONS, ADD FUNCTIONALITY TO READ THE NUMBER OF NODES AS THE FIRST ARGUMENT
 def load_edgl(fname):
     """Uses pandas to load an edgelist file and returns it as a list of tuples with pairs of connected nodes."""
