@@ -8,7 +8,7 @@ Author: Paulo Cesar Ventura da Silva (https://github.com/paulocv)
 import numba as nb
 # import numpy as np
 
-from ..model_base import ModelBase, calc_f_trans, calc_q_trans, initialize_states_basic, PARALLEL_NUMBA
+from ..model_base import ModelBase, calc_f_trans, calc_q_trans, initialize_states_basic, NUMBA_PARALLEL
 from ..types import nb_ncount_t, awk_adjlist_t, nb_p_t, nb_float_t
 
 
@@ -16,6 +16,7 @@ class SimpleSIS(ModelBase):
 
     # Child class (model-specific) attributes
     num_states = 2
+    num_layers = 1
     state_names = ["S", "I"]
     state_id = {s: i for i, s in enumerate(state_names)}
     prevalences = []  # [("I", "I")]  # Maybe not needed for SIS
@@ -52,7 +53,7 @@ class SimpleSIS(ModelBase):
 # SIS model time step function.
 # Here is where the model's rules are applied.
 @nb.njit(nb.void(nb_ncount_t, awk_adjlist_t, nb_p_t, nb_p_t, nb_float_t, nb_p_t[:, :], nb_p_t[:, :],
-                 nb_p_t[:, :], nb_p_t[:, :]), parallel=PARALLEL_NUMBA)
+                 nb_p_t[:, :], nb_p_t[:, :]), parallel=NUMBA_PARALLEL)
 def _iterate_model(num_nodes, g_neighbors, beta, mu, dt, p_state, f_trans, q_trans, p_next):
 
     # Aliases for better readability

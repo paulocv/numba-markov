@@ -50,6 +50,9 @@ def str_to_bool_safe(s, truelist=("True", "true", "T"), falselist=("False", "fal
         return True
     elif s in falselist:
         return False
+    elif isinstance(s, bool):
+        # In case the input is already a boolean.
+        return s
     else:
         raise ValueError("Hey, the string '{}' could not be understood as a boolean.".format(s))
 

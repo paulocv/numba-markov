@@ -10,12 +10,19 @@ import numpy as np
 
 from ..exec_data import ExecData
 from ..graph import NLayerMultiplex
-from ..model_base import ModelBase, calc_f_trans, calc_q_trans, initialize_states_basic, abo_event_probs, PARALLEL_NUMBA
+from ..model_base import ModelBase, calc_f_trans, calc_q_trans, initialize_states_basic, abo_event_probs, NUMBA_PARALLEL
 from ..types import nb_ncount_t, awk_adjlist_t, nb_p_t, nb_float_t, np_p_t, np_float_t
 
 
 class DoubleSIS(ModelBase):
-    """ TODO DOCS
+    """
+    Model for two interacting diseases. The interaction occurs by a change in the susceptibility to one disease
+    for individuals that are infected with the other one.
+    Refs:
+    - Sanz, Joaquín, et al. "Dynamics of interacting diseases." Physical Review X 4.4 (2014): 041005.
+    - Ventura, Paulo Cesar, Yamir Moreno, and Francisco A. Rodrigues.
+      "Role of time scale in the spreading of asymmetrically interacting diseases."
+       Physical Review Research 3.1 (2021): 013146.
 
     Indexes of the 4 model states
     -----------------------------
@@ -38,9 +45,11 @@ class DoubleSIS(ModelBase):
 
     # Child class attributes
     num_states = 4
+    num_layers = 2
     state_names = ["SS", "IS", "SI", "II"]
     state_id = {s: i for i, s in enumerate(state_names)}
-    prevalences = [("I1", ["IS", "II"]), ("I2", ["SI", "II"])]  # Named prevalences
+    # prevalences = [("I1", ["IS", "II"]), ("I2", ["SI", "II"])]  # Named prevalences with named states
+    prevalences = [("I1", [1, 3]), ("I2", [2, 3])]   # Named prevalences with state indexes
     num_infec_trans = 4  # SS -> IS, SS -> SI, IS -> II, SI -> II
     require_aux = True  # Requires an auxiliary array of node probabilities
 
@@ -92,7 +101,7 @@ class DoubleSIS(ModelBase):
 
 @nb.njit(nb.void(nb_ncount_t, awk_adjlist_t, awk_adjlist_t, nb_p_t, nb_p_t, nb_p_t, nb_p_t, nb_p_t, nb_p_t,
                  nb_float_t, nb_p_t[:, :], nb_p_t[:, :], nb_p_t[:, :], nb_p_t[:], nb_p_t[:, :]),
-         parallel=PARALLEL_NUMBA)
+         parallel=NUMBA_PARALLEL)
 def _iterate_model(num_nodes, g1_neighbors, g2_neighbors, beta1, beta2, mu1, mu2, gamma_beta1, gamma_beta2,
                    dt, p_state, f_trans, q_trans, aux_i, p_next):
     """Double SIS model iteration (compiled version)."""

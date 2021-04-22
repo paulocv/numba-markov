@@ -16,6 +16,7 @@ import scipy.sparse
 import scipy.sparse.linalg
 
 from .types import np_ncount_t, np_float_t  # , nb_ncount_t
+from .utils import load_edgl_as_array, guess_num_nodes_from
 
 
 class Layer:
@@ -290,6 +291,11 @@ class NLayerMultiplex:
         return self.size
 
 
+# ----------------------------------------------
+# HELPER FUNCTIONS
+# ----------------------------------------------
+
+
 def nx_to_layer(g_nx, keep_neighbors_as=None):
     """Shorthand to create a Markov Layer from an nx Graph.
     Only use nx Graphs that contain sequential indexes as names!! Otherwise, the edges can be wrongly set.
@@ -303,6 +309,49 @@ def nx_to_layer(g_nx, keep_neighbors_as=None):
 def layer_to_nx(g_layer):
     """Shorthand to create an nx Graph from a Markov Layer."""
     raise NotImplementedError
+
+
+def get_layer_paths_from_dict(input_dict, num_layers, layer_path_fmt="layer{:1d}_path"):
+    """Reads the layer paths from input_dict, as the parameters "layer[]_path". """
+    return list((input_dict[layer_path_fmt.format(i + 1)] for i in range(num_layers)))
+
+
+def make_multiplex_from_dict(input_dict, num_layers, layer_path_fmt="layer{:1d}_path", num_nodes=None,
+                             keep_neighbors_as=("awk", )):
+    """
+    Creates an NLayerMultiplex instance taking arguments from input_dict and loading layer from edgelist files.
+
+    Parameters
+    ----------
+    input_dict : dict
+        Dictionary with (at least but not only) the paths of each layer's edgelist file.
+    num_layers : int
+        Number of layers to be used.
+    layer_path_fmt : str
+        Format string for the input_dict keys that contain the layer paths.
+        Defaults to layer{:1d}_path. Must be formatable by .format(i), where i is an integer STARTING FROM 1.
+    num_nodes : int
+        Previously informed number of nodes of each layer.
+        If not informed, it is guessed from each layer's edgelist. In this case, an error is raised if the layers
+        do not have the same number of nodes.
+    keep_neighbors_as : tuple
+        Types of containers to keep the list of neighbors (adjacency lists) in each layer. Refer to Layer class
+        documentation (__init__ function).
+
+    Returns
+    -------
+    pop : NLayerMultiplex
+    """
+    layer_paths = get_layer_paths_from_dict(input_dict, num_layers, layer_path_fmt)
+    g_list = []
+    for path in layer_paths:
+        edges = load_edgl_as_array(path)
+        if num_nodes is None:
+            # An error will be raised later if the size of each layer is different
+            num_nodes = guess_num_nodes_from(edges)
+        g_list.append(Layer(num_nodes, edges, keep_neighbors_as=keep_neighbors_as))
+
+    return NLayerMultiplex(g_list)
 
 
 # -----------------------------------------

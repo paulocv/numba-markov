@@ -22,8 +22,17 @@ from .types import nb_p_t, nb_ncount_t, awk_adjlist_t, nb_int_t, nb_float_t
 from .utils import str_to_list_json, str_to_bool_safe
 
 
-# PARALLEL_NUMBA = True
-PARALLEL_NUMBA = str_to_bool_safe(os.getenv("NUMBA_PARALLEL", default=True))  # Reads from environment variable
+NUMBA_PARALLEL = str_to_bool_safe(os.getenv("NUMBA_PARALLEL", default=True))  # Reads from environment variable
+
+
+# # This can't change the parameter sent to numba decorators after this module is imported.
+# def set_numba_parallel(val: bool):
+#     """
+#     Sets the global variable NUMBA_PARALLEL, which controls if the numbaed that can be parallelized should actually
+#     be. Call to this must be before any call to the numbaed functions, which do the JIT.
+#     """
+#     global NUMBA_PARALLEL
+#     NUMBA_PARALLEL = val
 
 
 class ModelBase:
@@ -365,7 +374,7 @@ def initialize_states_basic(p_array, num_nodes, init_mode, init_data, i_healthy_
 # GENERIC FUNCTIONS FOR MARKOV CHAIN CALCULATIONS
 # ----------------------------------------------------------------
 
-@nb.njit(nb.void(nb_ncount_t, nb_p_t[:], nb_p_t, nb_p_t[:]), parallel=PARALLEL_NUMBA)
+@nb.njit(nb.void(nb_ncount_t, nb_p_t[:], nb_p_t, nb_p_t[:]), parallel=NUMBA_PARALLEL)
 def calc_f_trans(num_nodes, p_state_s, tp, f_trans_tr):
     """
     Calculates each node's f-factor for a given transition tr, with individual probability tp per contact.
@@ -378,7 +387,7 @@ def calc_f_trans(num_nodes, p_state_s, tp, f_trans_tr):
     #     f_trans_tr[i] = 1. - tp * p_state_s[i]
 
 
-@nb.njit(nb.void(nb_ncount_t, nb_p_t[:, :], nb_p_t, nb_p_t[:]), parallel=PARALLEL_NUMBA)
+@nb.njit(nb.void(nb_ncount_t, nb_p_t[:, :], nb_p_t, nb_p_t[:]), parallel=NUMBA_PARALLEL)
 def calc_f_trans_statelist(num_nodes, p_state_sub, tp, f_trans_tr):
     """
     Calculates each node's f-factor for a given transition tr, with individual probability tp per contact, in which
@@ -432,7 +441,7 @@ def calc_f_trans_statelist(num_nodes, p_state_sub, tp, f_trans_tr):
 #     q_trans_tr[:] = 1. - q_trans_tr[:]
 
 
-@nb.njit(nb.void(nb_ncount_t, awk_adjlist_t, nb_p_t[:], nb_p_t[:]), parallel=PARALLEL_NUMBA)
+@nb.njit(nb.void(nb_ncount_t, awk_adjlist_t, nb_p_t[:], nb_p_t[:]), parallel=NUMBA_PARALLEL)
 def calc_q_trans(num_nodes, g_neighbors, f_trans_tr, q_trans_tr):
     """
     Calculates each node's q-factor for a given transition re, based on the precalculated f-factors.

@@ -5,7 +5,11 @@ Common utilities for defining a paramvar script for numba-markov model.
 from argparse import ArgumentParser
 from collections import OrderedDict
 
-from .model_base import ModelBase
+import numpy as np
+
+from .model_base import ModelBase, SimResults
+from .exec_data import ExecData
+from .utils import nav_ipr, str_to_bool_safe
 
 # -------------------------------------------
 # ARGUMENT (ARGV) PARSING PROTOCOL
@@ -34,6 +38,16 @@ argv_parser.add_argument("--prompt-overwrite", action="store_true",
                          help="When specified, prompts the user if to overwrite a summary file if the given one "
                               "already exists. Default behavior is to overwrite without prompt.")
 
+# Numba parallel override: TODO - Couldn't find a good way :'(
+# Pathos parallel override
+argv_parser.add_argument("--pathos-multiprocess", type=str_to_bool_safe, default=None, metavar="True/False",
+                         help="Overrides the pathos_multiprocess parameter from the input file and the hardcoded "
+                              "default.")
+
+# Output writer flush time interval, in seconds
+argv_parser.add_argument("--flush-time", type=float, default=60.0, metavar="t(s)",
+                         help="Minimum time between consecutive write operations to the summary file. Set to 0 "
+                              "to write after each new calculation. Works only on sequential execution.")
 
 # --------------------------------------------
 # METRICS HANDLING via static classes
@@ -65,35 +79,121 @@ class MetricBase:
         """
         raise NotImplementedError
 
+    @staticmethod
+    def calc_metric(res, exd, pop, model, input_dict):
+        """
+        Extracts the metric from a simulation results (res) objecs and an execution infrastructure bunch (exd).
+        Return must be a list of scalar values, regardless of the number of outputs.
+
+        Parameters
+        ---------
+        res : SimResults
+        exd : ExecData
+        pop : NLayerMultiplex
+        model : ModelBase
+        input_dict : dict
+        """
+        raise NotImplementedError
+
+
+# METRIC TEMPLATE - JUST COMPY THIS CLASS AND MODIFY IT
+# ---------------------------------------------
+class MetricEmpty(MetricBase):
+
+    @staticmethod
+    def get_output_topics(model_class):
+        return []
+
+    @staticmethod
+    def calc_metric(res, exd, pop, model, input_dict):
+        return []
+# -----------------------------------------
+
 
 class MetricStateDensities(MetricBase):
+    """Stationary density of each fundamental state of the model."""
 
     @staticmethod
     def get_output_topics(model_class):
         return ["rho_" + name for name in model_class.state_names]
 
+    @staticmethod
+    def calc_metric(res, exd, pop, model, input_dict):
+        return [np.mean(exd.p_state[s]) for s in range(model.num_states)]
+
 
 class MetricPrevDensities(MetricBase):
+    """Stationary density of each registered prevalence of the model (Ex: I1 = IS + II)."""
 
     @staticmethod
     def get_output_topics(model_class):
         # Concatenates rho_ with the name of each prevalence registered on the model.
         return ["rho_" + prev_tuple[0] for prev_tuple in model_class.prevalences]
 
+    @staticmethod
+    def calc_metric(res, exd, pop, model, input_dict):
+        # prev[1] gets the list of state indexes of the given prevalence.
+        return [np.mean(  # Mean over...
+            np.sum(exd.p_state[prev[1]], axis=0))  # ...node density of the prevalence prev...
+            for prev in model.prevalences]  # ... for each prevalence.
+
 
 class MetricNumSteps(MetricBase):
+    """Number of steps until convergence of the iterative Markov chain process."""
 
     @staticmethod
     def get_output_topics(model_class):
         return ["num_steps", ]
 
+    @staticmethod
+    def calc_metric(res, exd, pop, model, input_dict):
+        return [res.num_steps]
+
+
+class MetricPopSize(MetricBase):
+    """Simple outputs the population size, already calculated at its creation."""
+
+    @staticmethod
+    def get_output_topics(model_class):
+        return ["pop_size", ]
+
+    @staticmethod
+    def calc_metric(res, exd, pop, model, input_dict):
+        return [pop.size]
+
+
+class MetricStateIPR(MetricBase):
+
+    @staticmethod
+    def get_output_topics(model_class):
+        return ["ipr_" + name for name in model_class.state_names]
+
+    @staticmethod
+    def calc_metric(res, exd, pop, model, input_dict):
+        return [nav_ipr(exd.p_state[s]) for s in range(model.num_states)]
+
+
+class MetricPrevIPR(MetricBase):
+    @staticmethod
+    def get_output_topics(model_class):
+        return ["ipr_" + prev_tuple[0] for prev_tuple in model_class.prevalences]
+
+    @staticmethod
+    def calc_metric(res, exd, pop, model, input_dict):
+        return [nav_ipr(  # IPR of...
+            np.sum(exd.p_state[prev[1]], axis=0))  # ...node density of the prevalence prev...
+            for prev in model.prevalences]  # ... for each prevalence.
+
+# -----------------------------------------------------------
+
 
 # Dictionary that stores the metric flags and their respective processor classes.
 # The dict is ordered, so outputs can have a consistent order among implementations.
-metric_flag_to_class = OrderedDict(
+METRIC_TO_CLASS = OrderedDict(
+    calc_pop_size=MetricPopSize,
     calc_state_densities=MetricStateDensities,
     calc_prevalence_densities=MetricPrevDensities,
+    calc_state_ipr=MetricStateIPR,
+    calc_prevalence_ipr=MetricPrevIPR,
     calc_num_steps=MetricNumSteps,
 )
-
-
