@@ -22,9 +22,9 @@ from numba_markov.types import *
 size = np_ncount_t(10)
 
 
-N = int(5E6)  # Change the path too!!!!
-# g_fname = "networks/SF-CM/N1M/g2p00_k2_000.edgl"
-g_fname = "networks/SF_samples/g2p20_k2_N5E6/sample_0000.edgl"
+N = int(1E5)  # Change the path too!!!!
+g_fname = "networks/SF-CM/N100k/g2p00_k2_000.edgl"
+# g_fname = "networks/SF_samples/g2p20_k2_N5E6/sample_0000.edgl"
 
 # Dummy construction for compilation.
 gl = Layer(N, np.array([[0, 1], [1, 2]], dtype=np_ncount_t), keep_neighbors_as=[])
@@ -93,3 +93,5 @@ print("{:0.6f} s".format(xtf - xt0))
 print("\n--------------\n")
 print("Eigenvalue: ", g_eigval)
 print("Eigenvector: ", g_eigvec)
+
+

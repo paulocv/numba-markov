@@ -104,3 +104,60 @@ def bla_ipr(x):
     #     return 0.
     # else:
     #     return np.sum(x2 * x2 / (s2 * s2))
+
+
+# ----------------------------------
+# MISC
+
+def make_counter(mode, param):
+    """
+    Returns a generator that produces numbers in a given sequence.
+    For this project, it is used to get the steps at which time series is stored.
+
+    In all modes, the first returned value is always zero. Return type is always int.
+
+    Supported modes
+    ---------------
+    "linear", "lin"
+        Arithmetic progression - sums 'param' at each call.
+    "exp", "exponential"
+        Geometric progression - starting from 1, multiplies by 'param' at each call
+
+    """
+    param = float(param)
+
+    if mode in ("linear", "lin"):
+        # LINEAR COUNTER (Arithmetic Progression)
+        def gen():
+            i = 0.
+            while True:
+                yield round(i)
+                i += param
+
+    elif mode in ("exp", "exponential"):
+        # EXP COUNTER (Geometric Progression)
+        def gen():
+            yield 0
+            i = 1.
+            while True:
+                yield round(i)
+                i *= param
+    else:
+        raise ValueError("Hey, mode '{}' passed to 'make_store_counter' was not understood.")
+
+    return gen
+
+
+def calc_num_counts_from_iter(gen, max_steps, upperlim=10000):
+    """
+    Calculates the number of times a generator gen() is called until its return value is greater (or equal) than
+    max_steps.
+
+    The integer upperlim avoids an infinite loop due to some error.
+    """
+    for i in range(upperlim):
+        if next(gen) >= max_steps:
+            return i + 1
+    else:
+        raise RuntimeError("Hey, tried to measure the length of this generator but it did not reach max_steps after "
+                           "{:d} calls.".format(upperlim))

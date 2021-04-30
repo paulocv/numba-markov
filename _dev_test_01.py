@@ -10,18 +10,19 @@ from numba_markov.exec_data import ExecData
 from numba_markov.model_base import *
 from numba_markov.models.simple_sis import *
 from numba_markov.models.double_sis import *
+from numba_markov.utils import load_edgl_as_array, guess_num_nodes_from
 from toolbox.network_gen_tools import generate_layer
 
 from numba_markov.model_base import calc_f_trans, calc_q_trans
 
 
 # Pop paramenters
-N = int(1E4)  # int(5E5)
-kmean = 5.
-p = kmean / N
+# N = int(1E4)  # int(5E5)
+# kmean = 5.
+# p = kmean / N
 
 # Model parameters - SIS
-beta1 = 0.045  # 0.005
+beta1 = 0.0105  # 0.005
 beta2 = 0.022
 
 mu1 = 0.5
@@ -32,14 +33,14 @@ gamma2 = 1.2
 
 # Initial conditions?
 init_mode = "p"  # "nodelist"
-init_data = 0.5  # [0, 1, 2, 3]
+init_data = 0.1  # [0, 1, 2, 3]
 
 # Simulation parameters
-t_max = 3000
+max_steps = 3000
 tol = 1.E-6
 
 # ETC
-plot_histo = True
+plot_histo = False
 
 # ---------------
 
@@ -59,9 +60,12 @@ def load_edgl(fname):
 
 print("Loading network edgelist from file")
 # edges = load_edgl("networks/ER/ER_10000_k10_1.edgl")
-edges = load_edgl("networks/assortat_SF-CM/N10k/g2p00_k2_002.edgl")
+# edges = load_edgl("networks/assortat_SF-CM/N10k/g2p00_k2_002.edgl")
 # edges = load_edgl("networks/assortat_SF-CM/N100k/g2p00_k2_000.edgl")
 # edges = load_edgl("networks/assortat_SF-CM/N500k/g2p00_k2_000.edgl")
+edges = load_edgl_as_array("networks/SF_samples/g2p20_k2_N1E5/sample_0000.edgl")
+
+N = guess_num_nodes_from(edges)
 gl = Layer(N, edges, keep_neighbors_as=["awk"])
 
 
@@ -112,19 +116,23 @@ exd.alloc_for(exd.__slots__, pop, model)
 # exit()
 
 # First run to compile everything
+# model.calc_stationary_densities(pop, exd, max_steps=2, init_mode=init_mode, init_data=init_data)
 model.calc_stationary_densities(pop, exd, max_steps=2, init_mode=init_mode, init_data=init_data)
 
 # SINGLE COMMAND RUN
 xt0 = time.time()
-# model.calc_stationary_densities(pop, exd, t_max, init_mode=init_mode, init_data=init_data)
+# model.calc_stationary_densities(pop, exd, max_steps, init_mode=init_mode, init_data=init_data)
 res = None
-for rep in range(5):
-    # res = model._timed_calc_stationary_densities(pop, exd, t_max, init_mode=init_mode, init_data=init_data)
-    res = model.calc_stationary_densities(pop, exd, t_max, init_mode=init_mode, init_data=init_data, tol=tol)
+for rep in range(1):
+    # res = model._timed_calc_stationary_densities(pop, exd, max_steps, init_mode=init_mode, init_data=init_data)
+    res = model.calc_stationary_densities_legacy(pop, exd, max_steps, init_mode=init_mode, init_data=init_data, tol=tol,
+                                          store_mode="linear", store_period=10, calc_tseries_state=True)
 xtf = time.time()
 print("Number of iterations = {:d} steps".format(res.num_steps))
-print("Exec time: {:0.5f}".format(xtf - xt0))
-
+print("Exec time: {:0.5f} s".format(xtf - xt0))
+#
+# print(res.rho_tseries[:res.tbuffer_index])
+# print(res.t_tseries[:res.tbuffer_index])
 
 
 # ---
@@ -145,7 +153,7 @@ if plot_histo:
 # calc_q_trans(pop.size, pop.g[0].neighbors_awk, exd.f_trans[0], exd.q_trans[0])
 
 # # _iterate_model(N, pop.g[0].neighbors_awk, beta, mu, 1., exd.p_state, exd.f_trans, exd.q_trans, exd.p_next)
-# for t in range(t_max):
+# for t in range(max_steps):
 #     model.iterate_model(pop, exd)
 #     exd.p_state[:] = exd.p_next[:]
 

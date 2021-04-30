@@ -38,7 +38,8 @@ argv_parser.add_argument("--prompt-overwrite", action="store_true",
                          help="When specified, prompts the user if to overwrite a summary file if the given one "
                               "already exists. Default behavior is to overwrite without prompt.")
 
-# Numba parallel override: TODO - Couldn't find a good way :'(
+# Numba parallel override TODO - Couldn't find a good way :'(
+
 # Pathos parallel override
 argv_parser.add_argument("--pathos-multiprocess", type=str_to_bool_safe, default=None, metavar="True/False",
                          help="Overrides the pathos_multiprocess parameter from the input file and the hardcoded "
