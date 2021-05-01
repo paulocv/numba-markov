@@ -71,8 +71,7 @@ for ((i_b1, beta1), (i_b2, beta2)) in itertools.product(enumerate(beta1_list), e
 
     print("{:0.4f}\t{:0.4f}".format(beta1, beta2), end="\t")
     model = DoubleSIS(beta1, beta2, mu1, mu2, gamma1, gamma2)
-    res = model.calc_stationary_densities(pop, exd, t_max, init_mode=init_mode, init_data=init_data,
-                                          tol=tol)
+    res = model.calc_stationary_densities(pop, exd, t_max, init_mode=init_mode, init_data=init_data, tol=tol)
     print(res.num_steps)
 
     # Store data

@@ -31,7 +31,8 @@ def str_to_list_json(s):
 def str_to_bool_safe(s, truelist=("True", "true", "T"), falselist=("False", "false", "F")):
     """
     Converts a boolean codified as a string. Instead of using 'eval', compares with lists of accepted strings for
-    both true and false bools, and raises an error if the string does not match any case.
+    both true and false bools, and raises an error if the string does not match any case. Also, if s is already a
+    boolean, returns as it is.
 
     Parameters
     ----------
@@ -56,6 +57,37 @@ def str_to_bool_safe(s, truelist=("True", "true", "T"), falselist=("False", "fal
     else:
         raise ValueError("Hey, the string '{}' could not be understood as a boolean.".format(s))
 
+
+def cast_to_export(value, float_fmt="{:12.6f}", int_fmt="{:12d}"):
+    """
+    Converts a given variable to a string in an adequate format for tabular files.
+    """
+    if isinstance(value, (float, np.floating)):
+        out = float_fmt.format(value)
+    elif isinstance(value, (int, np.integer)):
+        out = int_fmt.format(value)
+    else:
+        out = str(value)
+    return out
+
+
+def cast_to_export_list(values, float_fmt="{:12.6f}", int_fmt="{:12d}", sep="\t") -> str:
+    """
+    Converts a list of values into strings to be exported as a fixed width string, using cast_to_export in each value.
+    Adds a sep character after each entry.
+    """
+    out_str = ""
+    for value in values:
+        out_str += cast_to_export(value, float_fmt, int_fmt) + sep
+    return out_str
+
+
+def list_to_csv(parlist, sep=", "):
+    """Returns a csv string with elements from a list."""
+    result_str = ""
+    for par in parlist:
+        result_str += str(par) + sep
+    return result_str[:-len(sep)]
 
 # ----------------------------------------
 # NETWORK OPERATIONS
@@ -143,7 +175,7 @@ def make_counter(mode, param):
                 yield round(i)
                 i *= param
     else:
-        raise ValueError("Hey, mode '{}' passed to 'make_store_counter' was not understood.")
+        raise ValueError("Hey, mode '{}' passed to 'make_store_counter' was not understood.".format(mode))
 
     return gen
 

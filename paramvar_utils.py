@@ -1,7 +1,7 @@
 """
 Common utilities for defining a paramvar script for numba-markov model.
 """
-
+import os
 from argparse import ArgumentParser
 from collections import OrderedDict
 
@@ -9,7 +9,11 @@ import numpy as np
 
 from .model_base import ModelBase, SimResults
 from .exec_data import ExecData
-from .utils import nav_ipr, str_to_bool_safe
+from .utils import nav_ipr
+
+# # Switch between these to import from local .utils module or from the (linked) toolbox.file_tools.
+# from .utils import str_to_bool_safe, cast_to_export, cast_to_export_list, add_spaces_to_fill
+from .toolbox.file_tools import str_to_bool_safe, cast_to_export, cast_to_export_list, add_spaces_to_fill
 
 # -------------------------------------------
 # ARGUMENT (ARGV) PARSING PROTOCOL
@@ -50,8 +54,22 @@ argv_parser.add_argument("--flush-time", type=float, default=60.0, metavar="t(s)
                          help="Minimum time between consecutive write operations to the summary file. Set to 0 "
                               "to write after each new calculation. Works only on sequential execution.")
 
-# --------------------------------------------
+
+# -----------------------------------------------------
 # METRICS HANDLING via static classes
+# -----------------------------------------------------
+
+def get_metric_flags(input_dict, flag_to_class):
+    """Creates the list of metrics to be processed, based on an input dict with T/F flags for each metric."""
+
+    use_metrics = list()
+    for key in flag_to_class.keys():  # It is an ordered dict
+        # Gets the required flag from input dict, defaulting it to str(False) if not found.
+        if str_to_bool_safe(input_dict.get(key, "False")):
+            use_metrics.append(key)
+
+    return use_metrics
+
 
 # -------------------
 # GUIDE - How to include a new metrics
@@ -197,4 +215,107 @@ METRIC_TO_CLASS = OrderedDict(
     calc_state_ipr=MetricStateIPR,
     calc_prevalence_ipr=MetricPrevIPR,
     calc_num_steps=MetricNumSteps,
+)
+
+
+# -----------------------------------------------------
+# HEAVY SIMULATION OUTPUT DATA WITH 'EXPORT' STATIC CLASSES
+# -----------------------------------------------------
+
+class ExportBase:
+
+    @staticmethod
+    def get_fname_suffixes(model):
+        """
+        Must return a list of strings, each with the suffix of each exported file (except file extension).
+
+        Parameters
+        ----------
+        model: ModelBase
+
+        Returns
+        -------
+        lout: list[str]
+        """
+        return []
+
+    @staticmethod
+    def info_to_header(res, exd, pop, model, input_dict):
+        """
+        Must return a list of strings, each with extra info that's written into the header after its main contents.
+
+        Parameters
+        ----------
+        res: SimResults
+        exd: ExecData
+        pop: NLayerMultiplex
+        model: ModelBase
+        input_dict: dict[str, str]
+
+        Returns
+        -------
+        lout: list[str]
+        """
+        return []
+
+    @staticmethod
+    def get_fdata(res, exd, pop, model, input_dict):
+        """
+        Must return a list of strings, each with the casted simulation data to be exported.
+
+        Parameters
+        ----------
+        res: SimResults
+        exd: ExecData
+        pop: NLayerMultiplex
+        model: ModelBase
+        input_dict: dict[str, str]
+
+        Returns
+        -------
+        lout: list[str]
+        """
+        return []
+
+
+class ExportState(ExportBase):
+
+    @staticmethod
+    def get_fname_suffixes(model):
+        """ Just a single file with all states and time stamps. """
+        return [os.path.join("states", "sim")]
+
+    @staticmethod
+    def info_to_header(res, exd, pop, model, input_dict):
+        """ Exports overall state densities as a function of time. """
+        output_topics = ["rho_{}".format(name) for name in model.state_names]
+        out = "> outputs = "
+        out += ", ".join(output_topics) + "\n\n"  # List of outputs
+        for name in ["t"] + output_topics:  # Visual header
+            out += add_spaces_to_fill(name, 16)
+        out += "\n"
+
+        return [out]
+
+    @staticmethod
+    def get_fdata(res, exd, pop, model, input_dict):
+        """ Exports overall state densities as a function of time."""
+        out = ""
+        for t, p_array in zip(res.t_tseries, res.rho_tseries):
+            out += cast_to_export(t) + "\t"
+            out += cast_to_export_list(p_array, float_fmt="{:12.6E}")
+            out += "\n"
+
+        return [out]
+
+
+class ExportNodeState:
+    pass
+
+
+# Dictionary that stores the export flags and their respective processor classes.
+# The dict is ordered, so outputs can have a consistent order among implementations.
+EXPORT_TO_CLASS = OrderedDict(
+    export_tseries_state=ExportState,
+    export_tseries_nodestate=ExportNodeState,
 )

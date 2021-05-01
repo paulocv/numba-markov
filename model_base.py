@@ -156,7 +156,7 @@ class ModelBase:
         return res
 
     @staticmethod
-    def store_to_time_series(exd, res,  t, calc_tseries_state, calc_tseries_nodestate):
+    def store_to_time_series(exd, res,  t, export_tseries_state, export_tseries_nodestate):
         """TODO DOCS PLEASE
 
         Parameters
@@ -164,23 +164,25 @@ class ModelBase:
         exd : ExecData
         res : SimResults
         t : float
-        calc_tseries_state : bool
-        calc_tseries_nodestate : bool
+        export_tseries_state : bool
+        export_tseries_nodestate : bool
         """
         # Stores current time
         if res.t_tseries is not None:
             res.t_tseries[res.tbuffer_index] = t
 
-        if calc_tseries_state:
+        if export_tseries_state:
             # Mean p_state over the nodes
             res.rho_tseries[res.tbuffer_index, :] = np.mean(exd.p_state, axis=1)
+
+        # TODO: calc_tseries_nodestate
 
         res.tbuffer_index += 1
 
     def calc_stationary_densities(self, pop, exd, max_steps, init_mode=None, init_data=None, initialize_pop=True,
                                   dt=1., tol=1.E-6, persist_steps=5, error_check_period=25, check_convergence=True,
-                                  calc_tseries_state=False, calc_tseries_nodestate=False,
-                                  store_mode="linear", store_period=10, tbuffer_size=None,
+                                  export_tseries_state=False, export_tseries_nodestate=False,
+                                  store_mode=None, store_period=None, tbuffer_size=None,
                                   res=None):
         """
         Employs the Microscopic Markov Chain Approach to calculate the stationary probabilities of a model via
@@ -219,6 +221,24 @@ class ModelBase:
         error_check_period : int
             Number of time steps between numerical error checks (i.e., node probability renormalizations).
             Set to None to avoid error checking.
+        export_tseries_state : bool
+            Determine if the time series of overall densities of each state (the rho_X values) should be recorded
+            and exported into res.
+        export_tseries_nodestate : bool
+            Determine if the time series of nodewise state probabilities (the p_i(X) values) should be recorded
+            and exported into res. Huge memory usage!
+        store_mode : str
+            Periodicity mode of the time series storage (preventing the store of each and every time step).
+            Accepted values as in 'make_counter(mode, param)' function.
+            Defaults to 'linear' (inside code)
+        store_period : str
+            Parameter of the periodic counter for the time series storage. Interpretation depends on store_mode,
+            as reported in function 'make_counter(mode, param)'.
+            Defaults to "50.0" (inside code)
+        tbuffer_size : int
+            Length of the time series container. Must accommodate all stored values according to store_mode,
+            store_period and max_steps. If not informed, it is calculated (with some overhead of creating a dummy
+            counter).
         res : SimResults
             If informed, it is used as the bunch for simulation results.
             Otherwise, a new one is created.
@@ -232,6 +252,10 @@ class ModelBase:
         if error_check_period is None:
             # Never checks for numerical errors
             error_check_period = max_steps + 2
+
+        # Default store mode and parameter
+        store_mode = "linear" if store_mode is None else store_mode
+        store_period = "50." if store_period is None else store_period
 
         # Execution structure allocation (if not performed yet)
         exd.alloc_for(["p_state", "p_next", "f_trans", "q_trans", "aux_i"], pop, self)
@@ -249,8 +273,8 @@ class ModelBase:
 
         # Bunch to aggregate results of the simulation. It is returned by the function.
         res = self.prepare_sim_results_obj(tbuffer_size, pop.size, res,
-                                           calc_tseries_state=calc_tseries_state,
-                                           calc_tseries_nodestate=calc_tseries_nodestate)
+                                           calc_tseries_state=export_tseries_state,
+                                           calc_tseries_nodestate=export_tseries_nodestate)
 
         # ------------------------------------------------
         # MAIN SIMULATION LOOP
@@ -261,9 +285,8 @@ class ModelBase:
             # Periodic time series storing
             if i_t >= i_t_store:
                 i_t_store = next(store_counter)
-                self.store_to_time_series(exd, res, t,
-                                          calc_tseries_state=calc_tseries_state,
-                                          calc_tseries_nodestate=calc_tseries_nodestate)
+                self.store_to_time_series(exd, res, t, export_tseries_state=export_tseries_state,
+                                          export_tseries_nodestate=export_tseries_nodestate)
 
             # ------  MODEL UPDATE HERE  ----------
             self.iterate_model(pop, exd, dt=dt)
@@ -294,108 +317,108 @@ class ModelBase:
 
         # Updates everything (including the last step to the time series) and returns.
         exd.p_state[:] = exd.p_next[:]
-        self.store_to_time_series(exd, res, t, calc_tseries_state=calc_tseries_state,
-                                  calc_tseries_nodestate=calc_tseries_nodestate)
+        self.store_to_time_series(exd, res, t, export_tseries_state=export_tseries_state,
+                                  export_tseries_nodestate=export_tseries_nodestate)
         res.num_steps = i_t + 1
         return res
 
-    # - - SNAPSHOT FROM BEFORE TIME SERIES HANDLING - TO BE DELETED
-    def calc_stationary_densities_legacy(self, pop, exd, max_steps, init_mode=None, init_data=None, initialize_pop=True,
-                                  dt=1., tol=1.E-6, persist_steps=5, error_check_period=25,
-                                  res=None, **kwargs):
-        """
-        Employs the Microscopic Markov Chain Approach to calculate the stationary probabilities of a model via
-        simple fixed-point iterations of the model.
-
-        The population (a multiplex network) is informed as 'pop', while 'exd' must be an ExecData instance to
-        hold the necessary data structures for the calculations. The 'exd' structures do not need
-        to be preallocated.
-
-        The stationary probabilities of the last step will be stored in 'exd.p_state' array. Other results, such
-        as the number of iteration steps and if the process ended before 'max_steps', are returned as a SimResults
-        object.
-
-        Parameters
-        ----------
-        pop : NLayerMultiplex
-            Initialized multiplex object instance.
-        exd : ExecData
-            Execution data bunch, with containers not necessarily allocated.
-        max_steps : int
-            Maximum number of Markov iterations. If convergence is not detected after this number of steps,
-            the result is returned anyway, but a warning is exhibited.
-        init_mode : str
-            Initialization mode string, passed to self.init_states.
-        init_data : str or something else
-            Initialization data, passed to self.init_states.
-        initialize_pop : bool
-            Whether the routine should initialize the population (i.e., the state probabilities) before calculations.
-            If False, init_data and init_mode are ignored.
-        dt : float
-            Fixed time step length. Multiplies the dynamic probabilities of the model.
-        tol : float
-            Convergence tolerance. All states in all nodes must not differ from this amount.
-        persist_steps : int
-            Number of consecutive steps in which the convergence criterion must be met to declare overall convergence.
-        error_check_period : int
-            Number of time steps between numerical error checks (i.e., node probability renormalizations).
-            Set to None to avoid error checking.
-        res : SimResults
-            If informed, it is used as the bunch for simulation results.
-            Otherwise, a new one is created.
-
-        Return
-        ------
-        res : SimResults
-        """
-        DeprecationWarning("Hey, legacy function (with no time series handling) will be deleted.")
-
-        if error_check_period is None:
-            # Never checks for numerical errors
-            error_check_period = max_steps + 2
-
-        # Execution structure allocation (if not performed yet)
-        exd.alloc_for(["p_state", "p_next", "f_trans", "q_trans", "aux_i"], pop, self)
-
-        # Bunch to aggregate results of the simulation. It is returned by the function.
-        if res is None:
-            res = SimResults()
-        res.converged = True  # Set to false after for loop exhaustion
-
-        # State probability initializations
-        self._check_and_init_pop(pop, exd, initialize_pop, init_mode, init_data)
-        exd.p_next[:] = exd.p_state
-
-        # Main loop
-        persist_count = 0  # Number of consecutive steps declared as convergent
-        for i_t, t in enumerate(np.arange(0., max_steps*dt, dt)):
-            # MODEL UPDATE HERE
-            self.iterate_model(pop, exd, dt=dt)
-
-            # Periodic numerical error check
-            if (i_t + 1) % error_check_period == 0:
-                renormalize_node_probabilities(pop.size, exd.p_next)
-                # self.renormalize_node_probabilites(pop, exd)  # devnote: Overhead?
-
-            # Persistent convergence check
-            if self.check_states_are_close(pop, exd, tol):
-                persist_count += 1
-                if persist_count == persist_steps:
-                    # Updates things and returns results
-                    exd.p_state[:] = exd.p_next[:]
-                    res.num_steps = i_t + 1
-                    return res
-            else:
-                # Persist count reset to zero again.
-                persist_count = 0
-
-            # Update (consolidation) of changes for the next step
-            exd.p_state[:] = exd.p_next[:]
-
-        # At this point, it means that convergence was not achieved during desired number of steps.
-        res.converged = False
-        res.num_steps = max_steps
-        return res
+    # # - - SNAPSHOT FROM BEFORE TIME SERIES HANDLING - TO BE DELETED
+    # def calc_stationary_densities_legacy(self, pop, exd, max_steps, init_mode=None, init_data=None, initialize_pop=True,
+    #                               dt=1., tol=1.E-6, persist_steps=5, error_check_period=25,
+    #                               res=None, **kwargs):
+    #     """
+    #     Employs the Microscopic Markov Chain Approach to calculate the stationary probabilities of a model via
+    #     simple fixed-point iterations of the model.
+    #
+    #     The population (a multiplex network) is informed as 'pop', while 'exd' must be an ExecData instance to
+    #     hold the necessary data structures for the calculations. The 'exd' structures do not need
+    #     to be preallocated.
+    #
+    #     The stationary probabilities of the last step will be stored in 'exd.p_state' array. Other results, such
+    #     as the number of iteration steps and if the process ended before 'max_steps', are returned as a SimResults
+    #     object.
+    #
+    #     Parameters
+    #     ----------
+    #     pop : NLayerMultiplex
+    #         Initialized multiplex object instance.
+    #     exd : ExecData
+    #         Execution data bunch, with containers not necessarily allocated.
+    #     max_steps : int
+    #         Maximum number of Markov iterations. If convergence is not detected after this number of steps,
+    #         the result is returned anyway, but a warning is exhibited.
+    #     init_mode : str
+    #         Initialization mode string, passed to self.init_states.
+    #     init_data : str or something else
+    #         Initialization data, passed to self.init_states.
+    #     initialize_pop : bool
+    #         Whether the routine should initialize the population (i.e., the state probabilities) before calculations.
+    #         If False, init_data and init_mode are ignored.
+    #     dt : float
+    #         Fixed time step length. Multiplies the dynamic probabilities of the model.
+    #     tol : float
+    #         Convergence tolerance. All states in all nodes must not differ from this amount.
+    #     persist_steps : int
+    #         Number of consecutive steps in which the convergence criterion must be met to declare overall convergence.
+    #     error_check_period : int
+    #         Number of time steps between numerical error checks (i.e., node probability renormalizations).
+    #         Set to None to avoid error checking.
+    #     res : SimResults
+    #         If informed, it is used as the bunch for simulation results.
+    #         Otherwise, a new one is created.
+    #
+    #     Return
+    #     ------
+    #     res : SimResults
+    #     """
+    #     DeprecationWarning("Hey, legacy function (with no time series handling) will be deleted.")
+    #
+    #     if error_check_period is None:
+    #         # Never checks for numerical errors
+    #         error_check_period = max_steps + 2
+    #
+    #     # Execution structure allocation (if not performed yet)
+    #     exd.alloc_for(["p_state", "p_next", "f_trans", "q_trans", "aux_i"], pop, self)
+    #
+    #     # Bunch to aggregate results of the simulation. It is returned by the function.
+    #     if res is None:
+    #         res = SimResults()
+    #     res.converged = True  # Set to false after for loop exhaustion
+    #
+    #     # State probability initializations
+    #     self._check_and_init_pop(pop, exd, initialize_pop, init_mode, init_data)
+    #     exd.p_next[:] = exd.p_state
+    #
+    #     # Main loop
+    #     persist_count = 0  # Number of consecutive steps declared as convergent
+    #     for i_t, t in enumerate(np.arange(0., max_steps*dt, dt)):
+    #         # MODEL UPDATE HERE
+    #         self.iterate_model(pop, exd, dt=dt)
+    #
+    #         # Periodic numerical error check
+    #         if (i_t + 1) % error_check_period == 0:
+    #             renormalize_node_probabilities(pop.size, exd.p_next)
+    #             # self.renormalize_node_probabilites(pop, exd)  # devnote: Overhead?
+    #
+    #         # Persistent convergence check
+    #         if self.check_states_are_close(pop, exd, tol):
+    #             persist_count += 1
+    #             if persist_count == persist_steps:
+    #                 # Updates things and returns results
+    #                 exd.p_state[:] = exd.p_next[:]
+    #                 res.num_steps = i_t + 1
+    #                 return res
+    #         else:
+    #             # Persist count reset to zero again.
+    #             persist_count = 0
+    #
+    #         # Update (consolidation) of changes for the next step
+    #         exd.p_state[:] = exd.p_next[:]
+    #
+    #     # At this point, it means that convergence was not achieved during desired number of steps.
+    #     res.converged = False
+    #     res.num_steps = max_steps
+    #     return res
 
     # def _timed_calc_stationary_densities(self, pop, exd, max_steps, init_mode=None, init_data=None, initialize_pop=True,
     #                                      dt=1., tol=1.E-6,

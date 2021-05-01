@@ -41,7 +41,15 @@ class SimResults:
             Total number of steps a simulation had.
         converged : bool
             True if the simulation ended before max_steps.
-        TODO: include other ones
+        tbuffer_index : int
+            Stores the index of the time series corresponding to the next time step to be stored.
+            After the simulation, stores the size of the time series.
+        t_tseries : np.ndarray
+            Time series of the time stamps (t) themselves, as they can be not regular in time.
+            Signature: a[i_ti] = t
+        rho_tseries : np.ndarray
+            Time series of the overall densities of each model's state.
+            Signature: a[i_ti, s] = rho_i(S)
         """
         self.num_steps = num_steps
         self.converged = converged
